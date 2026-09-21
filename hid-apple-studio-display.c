@@ -298,8 +298,7 @@ static struct hid_field *asd_find_field(struct hid_report *report,
 }
 
 static struct hid_report *asd_find_report(struct hid_device *hdev,
-					  enum hid_report_type type,
-					  unsigned int usage)
+					  unsigned int type, unsigned int usage)
 {
 	struct hid_report *report;
 
