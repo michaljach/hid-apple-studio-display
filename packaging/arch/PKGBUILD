@@ -11,7 +11,7 @@ depends=('dkms')
 optdepends=('python-gobject: asd-autorotate helper'
             'iio-sensor-proxy: automatic brightness from the ambient light sensor')
 source=("$_pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('c4a5755c6a43d5d566ddca342389c7d64cf2dbe1ff4d326388f949052f6cef40')
 
 package() {
 	cd "$_pkgname-$pkgver"

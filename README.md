@@ -55,7 +55,7 @@ Without the script: `make dkms-install` (DKMS) or `make && sudo make install`
 
 | Distribution | |
 |---|---|
-| Arch / Manjaro / EndeavourOS | `sudo pacman -U https://github.com/michaljach/hid-apple-studio-display/releases/download/v1.0.1/hid-apple-studio-display-dkms-1.0.1-1-any.pkg.tar.zst` (built from `packaging/arch/PKGBUILD`; AUR submission pending) |
+| Arch / Manjaro / EndeavourOS | `sudo pacman -U https://github.com/michaljach/hid-apple-studio-display/releases/download/v1.1.0/hid-apple-studio-display-dkms-1.1.0-1-any.pkg.tar.zst` (built from `packaging/arch/PKGBUILD`; AUR submission pending) |
 | Debian / Ubuntu / Mint / Pop!_OS | `cp -r packaging/debian debian && dpkg-buildpackage -us -uc -b`, then `apt install ../hid-apple-studio-display-dkms_*.deb` |
 | Fedora / RHEL / Rocky / Alma / openSUSE | `rpmbuild -ba packaging/rpm/hid-apple-studio-display-dkms.spec` (needs `dkms`, from EPEL on RHEL‑likes) |
 
