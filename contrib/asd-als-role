@@ -7,5 +7,14 @@ set -u
 dev=/sys${1:?devpath}
 platform=$(basename "$(readlink -f "$dev/..")")
 hid=$(readlink -f "$dev/../..")
-first=$(ls "$hid" | grep '^HID-SENSOR-200041\.' | sort -t. -k2 -n | head -n 1)
+first=
+for d in "$hid"/HID-SENSOR-200041.*; do
+	[ -e "$d" ] || continue
+	n=${d##*/HID-SENSOR-200041.}
+	n=${n%%.*}
+	if [ -z "$first" ] || [ "$n" -lt "$first_n" ]; then
+		first=${d##*/}
+		first_n=$n
+	fi
+done
 if [ "$platform" = "$first" ]; then echo rear; else echo front; fi

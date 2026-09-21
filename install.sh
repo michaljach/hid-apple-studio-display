@@ -117,7 +117,9 @@ if have udevadm; then
 	udevadm control --reload
 	udevadm trigger --subsystem-match=iio --action=change 2>/dev/null || true
 fi
-have systemctl && systemctl try-restart iio-sensor-proxy.service 2>/dev/null || true
+if have systemctl; then
+	systemctl try-restart iio-sensor-proxy.service 2>/dev/null || true
+fi
 
 log "Installed. The module now loads automatically whenever the display is plugged in."
 sleep 1
