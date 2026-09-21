@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+include /usr/share/dpkg/pkg-info.mk
+
+PKG := hid-apple-studio-display-dkms
+MOD := hid-apple-studio-display
+
+%:
+	dh $@ --with dkms
+
+# DKMS builds the module on the target system; nothing to build or clean here
+override_dh_auto_configure override_dh_auto_build override_dh_auto_test override_dh_auto_clean:
+	@true
+
+override_dh_auto_install:
+	dh_install -p $(PKG) $(MOD).c Makefile usr/src/$(MOD)-$(DEB_VERSION_UPSTREAM)/
+
+override_dh_dkms:
+	dh_dkms -V $(DEB_VERSION_UPSTREAM)

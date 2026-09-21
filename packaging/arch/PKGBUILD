@@ -1,0 +1,20 @@
+# Maintainer: Michal Jach <michaljach@gmail.com>
+pkgname=hid-apple-studio-display-dkms
+_pkgname=hid-apple-studio-display
+pkgver=1.0.1
+pkgrel=1
+pkgdesc="Brightness control for the Apple Studio Display / Studio Display XDR as a /sys/class/backlight device (DKMS)"
+arch=('any')
+url="https://github.com/michaljach/hid-apple-studio-display"
+license=('GPL-2.0-only')
+depends=('dkms')
+source=("$_pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+# run `updpkgsums` once the release tag exists
+sha256sums=('SKIP')
+
+package() {
+	cd "$_pkgname-$pkgver"
+	install -Dm644 -t "$pkgdir/usr/src/$_pkgname-$pkgver" "$_pkgname.c" Makefile dkms.conf
+	install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md
+	install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
+}

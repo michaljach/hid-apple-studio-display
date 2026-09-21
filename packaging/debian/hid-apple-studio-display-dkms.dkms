@@ -1,0 +1,5 @@
+PACKAGE_NAME="hid-apple-studio-display"
+PACKAGE_VERSION="#MODULE_VERSION#"
+BUILT_MODULE_NAME[0]="hid-apple-studio-display"
+DEST_MODULE_LOCATION[0]="/kernel/drivers/hid"
+AUTOINSTALL="yes"

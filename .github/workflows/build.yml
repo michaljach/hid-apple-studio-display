@@ -1,0 +1,78 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  module:
+    name: kernel ${{ matrix.kernel }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # oldest supported LTS first, then each LTS series, then current stable
+        kernel: ["5.10.230", "5.15.170", "6.1.120", "6.6.60", "6.12.10", "stable"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc libelf-dev libssl-dev python3 jq
+
+      - name: Resolve kernel version
+        id: ver
+        run: |
+          v="${{ matrix.kernel }}"
+          if [ "$v" = stable ]; then
+            v=$(curl -fsSL https://www.kernel.org/releases.json | jq -r .latest_stable.version)
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "major=${v%%.*}" >> "$GITHUB_OUTPUT"
+
+      - name: Download and prepare kernel headers
+        run: |
+          v=${{ steps.ver.outputs.version }}
+          curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v${{ steps.ver.outputs.major }}.x/linux-$v.tar.xz" | tar -xJ
+          mv "linux-$v" linux
+          cd linux
+          make defconfig
+          scripts/config --enable MODULES --enable PCI --enable HID --enable USB_HID \
+                         --enable DRM --enable BACKLIGHT_CLASS_DEVICE
+          make olddefconfig
+          make -j"$(nproc)" modules_prepare
+
+      - name: Build module
+        # the prepared tree has no Module.symvers, so undefined-symbol checks
+        # are downgraded to warnings; what we test is that it compiles
+        run: make KDIR="$PWD/linux" KBUILD_MODPOST_WARN=1
+
+      - name: checkpatch
+        if: matrix.kernel == 'stable'
+        run: linux/scripts/checkpatch.pl --no-tree --strict -f hid-apple-studio-display.c
+
+  packaging:
+    name: packaging sanity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell scripts
+        run: |
+          sh -n install.sh && sh -n uninstall.sh
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck -s sh install.sh uninstall.sh
+      - name: Versions agree
+        run: |
+          v=$(sed -n 's/^PACKAGE_VERSION="\(.*\)"/\1/p' dkms.conf)
+          grep -q "MODULE_VERSION(\"$v\")" hid-apple-studio-display.c
+          grep -q "^pkgver=$v$" packaging/arch/PKGBUILD
+          grep -q "^Version: *$v$" packaging/rpm/hid-apple-studio-display-dkms.spec
+          head -1 packaging/debian/changelog | grep -q "($v-"
+      - name: Debian package
+        run: |
+          sudo apt-get install -y --no-install-recommends debhelper dh-dkms devscripts
+          cp -r packaging/debian debian
+          dpkg-buildpackage -us -uc -b
+          dpkg-deb -c ../hid-apple-studio-display-dkms_*_all.deb

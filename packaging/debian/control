@@ -1,0 +1,19 @@
+Source: hid-apple-studio-display
+Section: kernel
+Priority: optional
+Maintainer: Michal Jach <michaljach@gmail.com>
+Build-Depends: debhelper-compat (= 13), dh-dkms | dkms (<< 3.0)
+Standards-Version: 4.6.2
+Homepage: https://github.com/michaljach/hid-apple-studio-display
+Rules-Requires-Root: no
+
+Package: hid-apple-studio-display-dkms
+Architecture: all
+Depends: ${misc:Depends}
+Description: Apple Studio Display brightness driver (DKMS)
+ Kernel driver that exposes the brightness of an Apple Studio Display or
+ Studio Display XDR as a standard /sys/class/backlight device, attached to
+ the DRM connector the display is on, so desktop environments (GNOME 48+)
+ show their brightness slider for it and brightness keys work.
+ .
+ This package uses DKMS to build the module for every installed kernel.
