@@ -18,13 +18,26 @@
  * parented to the DRM connector the display is attached to.  That is the
  * layout GPU drivers use for laptop panels, and the one desktop environments
  * (GNOME's mutter in particular) look for to attach an external monitor's
- * brightness slider.  The display's other HID interfaces (vendor and sensor
- * hub collections) are handed to the generic HID paths untouched.
+ * brightness slider.  The vendor interface sharing that HID group is handed
+ * to the generic HID paths untouched.
+ *
+ * A second interface is a HID sensor hub holding only a Device Orientation
+ * collection (usage 0x20008A): input report 1 with three 9-bit "tilt" angles
+ * (0..360, usages 0x47F..0x481) and no feature report at all.  The in-tree
+ * sensor drivers cannot use it (no report interval / power state, and the
+ * sensor hub core walks report fields byte-wise, so 9-bit fields come out
+ * garbled), so this driver claims that interface too and exposes the angles
+ * as an IIO inclinometer (in_incli_{x,y,z}_raw, degrees), fetched with
+ * GET_REPORT on read.  An upright display in landscape reads 0/0/0; which
+ * axis moves when the panel is turned to portrait, and by how much, is not
+ * confirmed yet.  The display's ambient light sensors live on a third
+ * interface that stays with hid-sensor-hub.
  */
 
 #include <linux/backlight.h>
 #include <linux/hid.h>
 #include <linux/idr.h>
+#include <linux/iio/iio.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/pci.h>
@@ -41,6 +54,10 @@
 #define ASD_USAGE_BRIGHTNESS	0x00820010
 /* Physical Interface Device usage page (0x0f), Duration usage (0x50) */
 #define ASD_USAGE_DURATION	0x000f0050
+/* Sensors usage page (0x20), Orientation: Tilt X/Y/Z data fields */
+#define ASD_USAGE_TILT_X	0x0020047f
+#define ASD_USAGE_TILT_Y	0x00200480
+#define ASD_USAGE_TILT_Z	0x00200481
 
 /* How long to keep waiting for the GPU driver to bring up its connectors */
 #define ASD_CONNECTOR_RETRY_MS	1000
@@ -57,11 +74,17 @@ MODULE_PARM_DESC(fade_ms, "Transition time for brightness changes in millisecond
 
 static DEFINE_IDA(asd_ida);
 
+/* One usage inside a report: the field holding it and its index in there */
+struct asd_usage {
+	struct hid_field *field;
+	unsigned int index;
+};
+
 struct asd_device {
 	struct hid_device *hdev;
 	struct hid_report *report;		/* feature report with the controls */
-	struct hid_field *brightness;
-	struct hid_field *duration;		/* optional */
+	struct asd_usage brightness;
+	struct asd_usage duration;		/* optional */
 	struct mutex lock;			/* serialises access to buf */
 	u8 *buf;				/* hid_report_len(report) bytes */
 	struct backlight_device *bl;
@@ -69,6 +92,92 @@ struct asd_device {
 	unsigned int retries;
 	int id;
 };
+
+struct asd_orient {
+	struct hid_device *hdev;
+	struct hid_report *report;		/* input report with the angles */
+	struct asd_usage tilt[3];
+	struct mutex lock;			/* serialises access to buf */
+	u8 *buf;
+};
+
+/* --- HID transport ----------------------------------------------------- */
+
+/*
+ * The display autosuspends after a couple of idle seconds and control
+ * transfers to a suspended device fail, so wake it for the request, as
+ * hidraw does.
+ */
+static int asd_hid_request(struct hid_device *hdev, struct hid_report *report,
+			   u8 *buf, int reqtype)
+{
+	int ret;
+
+	ret = hid_hw_power(hdev, PM_HINT_FULLON);
+	if (ret < 0)
+		return ret;
+	ret = hid_hw_raw_request(hdev, report->id, buf, hid_report_len(report),
+				 report->type, reqtype);
+	hid_hw_power(hdev, PM_HINT_NORMAL);
+
+	return ret;
+}
+
+/* Fetch a report and pull one usage's value out of it */
+static int asd_hid_get(struct hid_device *hdev, struct hid_report *report,
+		       u8 *buf, const struct asd_usage *u, u32 *value)
+{
+	unsigned int offset = u->field->report_offset +
+			      u->index * u->field->report_size;
+	int need = 1 + DIV_ROUND_UP(offset + u->field->report_size, 8);
+	int ret;
+
+	memset(buf, 0, hid_report_len(report));
+	buf[0] = report->id;
+	ret = asd_hid_request(hdev, report, buf, HID_REQ_GET_REPORT);
+	if (ret < 0)
+		return ret;
+	if (ret < need)
+		return -EIO;
+
+	*value = hid_field_extract(hdev, buf + 1, offset, u->field->report_size);
+	return 0;
+}
+
+static bool asd_find_usage(struct hid_report *report, unsigned int usage,
+			   struct asd_usage *u)
+{
+	int i, j;
+
+	for (i = 0; i < report->maxfield; i++) {
+		struct hid_field *f = report->field[i];
+
+		for (j = 0; j < f->maxusage; j++) {
+			if (f->usage[j].hid != usage)
+				continue;
+			if (u) {
+				u->field = f;
+				u->index = j;
+			}
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static struct hid_report *asd_find_report(struct hid_device *hdev,
+					  unsigned int type, unsigned int usage)
+{
+	struct hid_report *report;
+
+	list_for_each_entry(report, &hdev->report_enum[type].report_list, list) {
+		if (asd_find_usage(report, usage, NULL))
+			return report;
+	}
+
+	return NULL;
+}
 
 /* --- DRM connector lookup --------------------------------------------- */
 
@@ -146,40 +255,19 @@ static struct device *asd_find_connector(struct hid_device *hdev)
 	return s.found;
 }
 
-/* --- HID transport ----------------------------------------------------- */
-
-/*
- * The display autosuspends after a couple of idle seconds and control
- * transfers to a suspended device fail, so wake it for the request, as
- * hidraw does.
- */
-static int asd_raw_request(struct asd_device *asd, int reqtype)
-{
-	struct hid_device *hdev = asd->hdev;
-	int ret;
-
-	ret = hid_hw_power(hdev, PM_HINT_FULLON);
-	if (ret < 0)
-		return ret;
-	ret = hid_hw_raw_request(hdev, asd->report->id, asd->buf,
-				 hid_report_len(asd->report),
-				 HID_FEATURE_REPORT, reqtype);
-	hid_hw_power(hdev, PM_HINT_NORMAL);
-
-	return ret;
-}
+/* --- brightness -------------------------------------------------------- */
 
 static int asd_set_brightness(struct asd_device *asd, u32 value)
 {
 	int ret;
 
 	mutex_lock(&asd->lock);
-	asd->brightness->value[0] = value;
-	if (asd->duration)
-		asd->duration->value[0] = min_t(u32, fade_ms,
-						asd->duration->logical_maximum);
+	asd->brightness.field->value[asd->brightness.index] = value;
+	if (asd->duration.field)
+		asd->duration.field->value[asd->duration.index] =
+			min_t(u32, fade_ms, asd->duration.field->logical_maximum);
 	hid_output_report(asd->report, asd->buf);
-	ret = asd_raw_request(asd, HID_REQ_SET_REPORT);
+	ret = asd_hid_request(asd->hdev, asd->report, asd->buf, HID_REQ_SET_REPORT);
 	mutex_unlock(&asd->lock);
 
 	return ret < 0 ? ret : 0;
@@ -187,22 +275,10 @@ static int asd_set_brightness(struct asd_device *asd, u32 value)
 
 static int asd_get_brightness(struct asd_device *asd, u32 *value)
 {
-	struct hid_field *f = asd->brightness;
-	int len = hid_report_len(asd->report);
-	int need = 1 + DIV_ROUND_UP(f->report_offset + f->report_size, 8);
 	int ret;
 
 	mutex_lock(&asd->lock);
-	memset(asd->buf, 0, len);
-	asd->buf[0] = asd->report->id;
-	ret = asd_raw_request(asd, HID_REQ_GET_REPORT);
-	if (ret >= 0 && ret < need)
-		ret = -EIO;
-	if (ret >= 0) {
-		*value = hid_field_extract(asd->hdev, asd->buf + 1,
-					   f->report_offset, f->report_size);
-		ret = 0;
-	}
+	ret = asd_hid_get(asd->hdev, asd->report, asd->buf, &asd->brightness, value);
 	mutex_unlock(&asd->lock);
 
 	return ret;
@@ -217,8 +293,8 @@ static int asd_bl_update_status(struct backlight_device *bl)
 
 	/* The panel cannot be switched off through this control, only dimmed */
 	return asd_set_brightness(asd, clamp_val(brightness,
-						 asd->brightness->logical_minimum,
-						 asd->brightness->logical_maximum));
+						 asd->brightness.field->logical_minimum,
+						 asd->brightness.field->logical_maximum));
 }
 
 static int asd_bl_get_brightness(struct backlight_device *bl)
@@ -244,7 +320,7 @@ static void asd_register_backlight(struct work_struct *work)
 	struct backlight_properties props = {
 		.type = BACKLIGHT_RAW,
 		.scale = BACKLIGHT_SCALE_LINEAR,
-		.max_brightness = asd->brightness->logical_maximum,
+		.max_brightness = asd->brightness.field->logical_maximum,
 	};
 	struct backlight_device *bl;
 	struct device *parent;
@@ -276,39 +352,117 @@ static void asd_register_backlight(struct work_struct *work)
 	asd->bl = bl;
 
 	hid_info(hdev, "backlight %s registered on %s (%d..%d, now %u)\n",
-		 name, dev_name(parent), asd->brightness->logical_minimum,
-		 asd->brightness->logical_maximum, value);
+		 name, dev_name(parent), asd->brightness.field->logical_minimum,
+		 asd->brightness.field->logical_maximum, value);
+}
+
+/* --- orientation sensor ------------------------------------------------ */
+
+#define ASD_ORIENT_CHANNEL(_mod, _idx) {				\
+	.type = IIO_INCLI,						\
+	.modified = 1,							\
+	.channel2 = IIO_MOD_##_mod,					\
+	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),			\
+	.info_mask_shared_by_type = BIT(IIO_CHAN_INFO_SCALE),		\
+	.address = (_idx),						\
+}
+
+static const struct iio_chan_spec asd_orient_channels[] = {
+	ASD_ORIENT_CHANNEL(X, 0),
+	ASD_ORIENT_CHANNEL(Y, 1),
+	ASD_ORIENT_CHANNEL(Z, 2),
+};
+
+static int asd_orient_read_raw(struct iio_dev *indio_dev,
+			       struct iio_chan_spec const *chan,
+			       int *val, int *val2, long mask)
+{
+	struct asd_orient *o = iio_priv(indio_dev);
+	u32 value;
+	int ret;
+
+	switch (mask) {
+	case IIO_CHAN_INFO_RAW:
+		mutex_lock(&o->lock);
+		ret = asd_hid_get(o->hdev, o->report, o->buf,
+				  &o->tilt[chan->address], &value);
+		mutex_unlock(&o->lock);
+		if (ret)
+			return ret;
+		*val = value;
+		return IIO_VAL_INT;
+	case IIO_CHAN_INFO_SCALE:
+		*val = 1;	/* degrees */
+		return IIO_VAL_INT;
+	default:
+		return -EINVAL;
+	}
+}
+
+static const struct iio_info asd_orient_info = {
+	.read_raw = asd_orient_read_raw,
+};
+
+static int asd_orient_probe(struct hid_device *hdev)
+{
+	static const unsigned int usages[3] = {
+		ASD_USAGE_TILT_X, ASD_USAGE_TILT_Y, ASD_USAGE_TILT_Z,
+	};
+	struct hid_report *report;
+	struct iio_dev *indio_dev;
+	struct asd_orient *o;
+	int i, ret;
+
+	/* The other sensor-hub interface (ambient light) is not ours */
+	report = asd_find_report(hdev, HID_INPUT_REPORT, ASD_USAGE_TILT_X);
+	if (!report)
+		return -ENODEV;
+
+	indio_dev = devm_iio_device_alloc(&hdev->dev, sizeof(*o));
+	if (!indio_dev)
+		return -ENOMEM;
+
+	o = iio_priv(indio_dev);
+	o->hdev = hdev;
+	o->report = report;
+	for (i = 0; i < ARRAY_SIZE(usages); i++) {
+		if (!asd_find_usage(report, usages[i], &o->tilt[i]))
+			return -ENODEV;
+	}
+	o->buf = devm_kzalloc(&hdev->dev, hid_report_len(report), GFP_KERNEL);
+	if (!o->buf)
+		return -ENOMEM;
+	mutex_init(&o->lock);
+
+	indio_dev->name = "apple_studio_display_orientation";
+	indio_dev->info = &asd_orient_info;
+	indio_dev->modes = INDIO_DIRECT_MODE;
+	indio_dev->channels = asd_orient_channels;
+	indio_dev->num_channels = ARRAY_SIZE(asd_orient_channels);
+
+	hid_set_drvdata(hdev, indio_dev);
+
+	ret = hid_hw_start(hdev, HID_CONNECT_HIDRAW);
+	if (ret)
+		return ret;
+
+	ret = iio_device_register(indio_dev);
+	if (ret) {
+		hid_hw_stop(hdev);
+		return ret;
+	}
+
+	hid_info(hdev, "orientation sensor registered as %s\n", indio_dev->name);
+	return 0;
+}
+
+static void asd_orient_remove(struct hid_device *hdev)
+{
+	iio_device_unregister(hid_get_drvdata(hdev));
+	hid_hw_stop(hdev);
 }
 
 /* --- HID driver -------------------------------------------------------- */
-
-static struct hid_field *asd_find_field(struct hid_report *report,
-					unsigned int usage)
-{
-	int i;
-
-	for (i = 0; i < report->maxfield; i++) {
-		struct hid_field *f = report->field[i];
-
-		if (f->maxusage >= 1 && f->usage[0].hid == usage)
-			return f;
-	}
-
-	return NULL;
-}
-
-static struct hid_report *asd_find_report(struct hid_device *hdev,
-					  unsigned int type, unsigned int usage)
-{
-	struct hid_report *report;
-
-	list_for_each_entry(report, &hdev->report_enum[type].report_list, list) {
-		if (asd_find_field(report, usage))
-			return report;
-	}
-
-	return NULL;
-}
 
 static int asd_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
@@ -319,6 +473,9 @@ static int asd_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	ret = hid_parse(hdev);
 	if (ret)
 		return ret;
+
+	if (hdev->group == HID_GROUP_SENSOR_HUB)
+		return asd_orient_probe(hdev);
 
 	/* Only one of the display's interfaces carries the monitor controls */
 	report = asd_find_report(hdev, HID_FEATURE_REPORT, ASD_USAGE_BRIGHTNESS);
@@ -335,8 +492,8 @@ static int asd_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	asd->hdev = hdev;
 	asd->report = report;
-	asd->brightness = asd_find_field(report, ASD_USAGE_BRIGHTNESS);
-	asd->duration = asd_find_field(report, ASD_USAGE_DURATION);
+	asd_find_usage(report, ASD_USAGE_BRIGHTNESS, &asd->brightness);
+	asd_find_usage(report, ASD_USAGE_DURATION, &asd->duration);
 	mutex_init(&asd->lock);
 	INIT_DELAYED_WORK(&asd->register_work, asd_register_backlight);
 
@@ -361,6 +518,11 @@ static void asd_remove(struct hid_device *hdev)
 {
 	struct asd_device *asd = hid_get_drvdata(hdev);
 
+	if (hdev->group == HID_GROUP_SENSOR_HUB) {
+		asd_orient_remove(hdev);
+		return;
+	}
+
 	if (!asd) {
 		hid_hw_stop(hdev);
 		return;
@@ -378,6 +540,10 @@ static const struct hid_device_id asd_devices[] = {
 		     USB_DEVICE_ID_APPLE_STUDIO_DISPLAY) },
 	{ HID_DEVICE(BUS_USB, HID_GROUP_GENERIC, USB_VENDOR_ID_APPLE,
 		     USB_DEVICE_ID_APPLE_STUDIO_DISPLAY_XDR) },
+	{ HID_DEVICE(BUS_USB, HID_GROUP_SENSOR_HUB, USB_VENDOR_ID_APPLE,
+		     USB_DEVICE_ID_APPLE_STUDIO_DISPLAY) },
+	{ HID_DEVICE(BUS_USB, HID_GROUP_SENSOR_HUB, USB_VENDOR_ID_APPLE,
+		     USB_DEVICE_ID_APPLE_STUDIO_DISPLAY_XDR) },
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, asd_devices);
@@ -391,6 +557,6 @@ static struct hid_driver asd_driver = {
 module_hid_driver(asd_driver);
 
 MODULE_AUTHOR("Michal Jach");
-MODULE_DESCRIPTION("Apple Studio Display backlight driver");
+MODULE_DESCRIPTION("Apple Studio Display backlight and orientation sensor driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.1.0");

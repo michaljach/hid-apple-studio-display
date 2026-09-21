@@ -5,6 +5,9 @@
 #   2. registers the module with DKMS so it is rebuilt on every kernel update,
 #      or, where DKMS is unavailable, builds and installs it for this kernel
 #   3. loads the module
+#   4. installs the udev rule and helpers that make iio-sensor-proxy use the
+#      display's front light sensor and give the orientation interface to this
+#      driver, plus the (experimental, opt-in) asd-autorotate helper
 #
 # Usage: sudo ./install.sh            (or just ./install.sh; it re-runs itself
 #                                      through sudo/doas when needed)
@@ -102,6 +105,20 @@ if ! modprobe "$MOD"; then
 	die "modprobe $MOD failed; see 'dmesg | tail'"
 fi
 
+# --- 4. desktop integration ------------------------------------------------
+
+install -Dm755 contrib/asd-als-role /usr/lib/udev/asd-als-role
+install -Dm755 contrib/asd-bind-orientation /usr/lib/udev/asd-bind-orientation
+install -Dm644 contrib/90-hid-apple-studio-display.rules /etc/udev/rules.d/90-hid-apple-studio-display.rules
+install -Dm755 contrib/asd-autorotate /usr/local/bin/asd-autorotate
+install -Dm644 contrib/asd-autorotate.service /usr/local/lib/systemd/user/asd-autorotate.service
+/usr/lib/udev/asd-bind-orientation
+if have udevadm; then
+	udevadm control --reload
+	udevadm trigger --subsystem-match=iio --action=change 2>/dev/null || true
+fi
+have systemctl && systemctl try-restart iio-sensor-proxy.service 2>/dev/null || true
+
 log "Installed. The module now loads automatically whenever the display is plugged in."
 sleep 1
 bl=
@@ -113,6 +130,12 @@ if [ -n "$bl" ]; then
 		"$bl" "$(basename "$(dirname "$(readlink -f "$bl")")")" \
 		"$(cat "$bl/brightness")" "$(cat "$bl/max_brightness")"
 	printf '    GNOME picks up a new backlight on the next monitor change:\n    re-plug the display, or re-apply the display settings once.\n'
+	for d in /sys/bus/iio/devices/iio:device*; do
+		[ -e "$d/name" ] && [ "$(cat "$d/name")" = apple_studio_display_orientation ] \
+			&& printf '    orientation sensor: %s (x=%s y=%s z=%s)\n' "$d" \
+				"$(cat "$d/in_incli_x_raw")" "$(cat "$d/in_incli_y_raw")" "$(cat "$d/in_incli_z_raw")"
+	done
+	printf '    Auto-rotate (experimental): systemctl --user enable --now asd-autorotate\n'
 else
 	printf '    No display found yet: plug the Studio Display'"'"'s USB/Thunderbolt link in and check\n    /sys/class/backlight/ or "dmesg | grep apple-studio".\n'
 fi

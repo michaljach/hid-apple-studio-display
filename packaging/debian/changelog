@@ -1,3 +1,10 @@
+hid-apple-studio-display (1.1.0-1) unstable; urgency=medium
+
+  * Orientation sensor exposed as an IIO inclinometer; asd-autorotate helper.
+  * udev rule so iio-sensor-proxy uses the front ambient light sensor.
+
+ -- Michal Jach <michaljach@gmail.com>  Mon, 21 Sep 2026 11:20:00 +0200
+
 hid-apple-studio-display (1.0.1-1) unstable; urgency=medium
 
   * Initial release.

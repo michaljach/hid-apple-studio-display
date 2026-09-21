@@ -1,19 +1,25 @@
 # Maintainer: Michal Jach <michaljach@gmail.com>
 pkgname=hid-apple-studio-display-dkms
 _pkgname=hid-apple-studio-display
-pkgver=1.0.1
+pkgver=1.1.0
 pkgrel=1
-pkgdesc="Brightness control for the Apple Studio Display / Studio Display XDR as a /sys/class/backlight device (DKMS)"
+pkgdesc="Brightness (backlight) and orientation sensor driver for the Apple Studio Display / Studio Display XDR (DKMS)"
 arch=('any')
 url="https://github.com/michaljach/hid-apple-studio-display"
 license=('GPL-2.0-only')
 depends=('dkms')
+optdepends=('python-gobject: asd-autorotate helper'
+            'iio-sensor-proxy: automatic brightness from the ambient light sensor')
 source=("$_pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('555efeb47184f0662d8f1c02df1f498694cd1e98bbe85f371dd35153bfafa5d6')
+sha256sums=('SKIP')
 
 package() {
 	cd "$_pkgname-$pkgver"
 	install -Dm644 -t "$pkgdir/usr/src/$_pkgname-$pkgver" "$_pkgname.c" Makefile dkms.conf
+	install -Dm644 -t "$pkgdir/usr/lib/udev/rules.d" contrib/90-hid-apple-studio-display.rules
+	install -Dm755 -t "$pkgdir/usr/lib/udev" contrib/asd-als-role contrib/asd-bind-orientation
+	install -Dm755 -t "$pkgdir/usr/bin" contrib/asd-autorotate
+	install -Dm644 -t "$pkgdir/usr/lib/systemd/user" contrib/asd-autorotate.service
 	install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md
 	install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }

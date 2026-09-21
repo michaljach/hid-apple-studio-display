@@ -1,0 +1,16 @@
+# Desktop integration for hid-apple-studio-display.
+
+# The display has two ambient light sensors, front and rear, and
+# iio-sensor-proxy would take whichever it enumerates first (the rear one),
+# making GNOME's automatic brightness follow the wall behind the monitor.
+# Hide the rear sensor from it. asd-als-role tells the two apart by their
+# order within the display's HID device.
+ACTION=="add|change", SUBSYSTEM=="iio", KERNELS=="0003:05AC:1114.*|0003:05AC:1116.*", ATTR{name}=="als", \
+  PROGRAM="/usr/lib/udev/asd-als-role %p", RESULT=="rear", ENV{IIO_SENSOR_PROXY_TYPE}=""
+
+# The orientation sensor lives on a HID sensor-hub interface that both
+# hid-sensor-hub and hid-apple-studio-display match; which one wins at
+# enumeration is a race. Once the drivers are loaded, hand the interface to
+# hid-apple-studio-display (the only one that can read its 9-bit fields).
+ACTION=="add", SUBSYSTEM=="hid", ENV{MODALIAS}=="hid:b0003g0003v000005ACp0000111[46]", \
+  RUN+="/usr/lib/udev/asd-bind-orientation %k"

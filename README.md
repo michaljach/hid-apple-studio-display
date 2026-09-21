@@ -1,11 +1,16 @@
 # hid-apple-studio-display
 
-Linux kernel driver that puts the brightness of an **Apple Studio Display**
-(2022) or **Studio Display XDR** (2026) under `/sys/class/backlight`, attached
-to the DRM connector the display is on — the same layout GPU drivers use for
-laptop panels. Desktop environments then treat it as an ordinary backlight:
-GNOME (mutter ≥ 48) shows its brightness slider for the monitor, brightness
-keys work, and tools like `brightnessctl` or `light` can drive it.
+Linux kernel driver for the **Apple Studio Display** (2022) and **Studio
+Display XDR** (2026):
+
+- **Brightness** as a `/sys/class/backlight` device attached to the DRM
+  connector the display is on — the layout GPU drivers use for laptop panels,
+  so desktops treat it as an ordinary backlight: GNOME (mutter ≥ 48) shows its
+  brightness slider for the monitor, brightness keys work, GNOME's automatic
+  brightness follows the display's ambient light sensor, and `brightnessctl`
+  or `light` can drive it.
+- **Orientation sensor** as an IIO inclinometer, with an experimental
+  `asd-autorotate` helper that rotates the GNOME output to match.
 
 ```
 $ ls /sys/class/backlight/
@@ -79,6 +84,44 @@ time** after installing either re-plug the display or re-apply the display
 configuration (Settings → Displays). From the next boot on the module is loaded
 before the session starts and nothing needs doing.
 
+## Automatic brightness
+
+The display has two ambient light sensors (front and rear); the kernel's
+`hid-sensor-als` exposes both as IIO devices with illuminance, colour
+temperature and chromaticity. iio-sensor-proxy would take the rear one, so the
+installed udev rule hides it and GNOME's *Automatic Screen Brightness* follows
+the front sensor.
+
+How GNOME applies it: the brightness slider acts as a **bias** on the
+automatic target (`clamp(auto + slider − 0.5)`), and the reference light level
+is re-normalised whenever you move the slider. So set the slider to where you
+like it *now*, and the display tracks the room from there; at 100 % it can
+only ever stay at maximum.
+
+## Auto-rotate (experimental)
+
+The orientation interface is claimed by this driver (udev rebinds it from
+`hid-sensor-hub`, which cannot parse its 9-bit fields) and shows up as
+`/sys/bus/iio/devices/iio:deviceN` named `apple_studio_display_orientation`
+with `in_incli_{x,y,z}_raw` in degrees. An upright display reads 0/0/0.
+
+GNOME only auto-rotates a laptop's built-in panel, so `asd-autorotate` polls
+the sensor and applies the transform to the display's connector through
+mutter's DisplayConfig API (temporary configuration, nothing is written to
+`monitors.xml`):
+
+```sh
+asd-autorotate --watch                       # print readings while you turn the display
+systemctl --user enable --now asd-autorotate # run it for the session
+```
+
+**Only the landscape reading has been observed so far.** The helper assumes
+the Z angle is the rotation about the screen's normal and snaps it to quarter
+turns; if your readings say otherwise, pass `--axis`, `--invert` or `--offset`
+(edit `ExecStart` in the unit) and please open an issue with the numbers.
+Each read wakes the display's USB device, so the poll interval (default 1 s)
+also determines how long it stays out of autosuspend.
+
 ## Module parameters
 
 | Parameter | Default | |
@@ -94,15 +137,21 @@ options hid-apple-studio-display connector=DP-1 fade_ms=150
 
 ## How it works
 
-The display's USB device carries several HID interfaces; one of them is a
-*Monitor Control* collection (usage page 0x80). Its feature report 1 holds the
+The display's USB device carries several HID interfaces. One is a *Monitor
+Control* collection (usage page 0x80) whose feature report 1 holds the
 brightness as a 32-bit value in 0.01-nit units — logical range 400–60000, i.e.
 4–600 nits — followed by a 16-bit transition time in milliseconds. The driver
 binds that interface, reads the field layout from the report descriptor rather
 than hard-coding it, and registers a `raw` backlight device with the display's
 DRM connector as parent, which is what mutter requires before it will attach a
-backlight to an external monitor. The display's other interfaces (vendor and
-sensor-hub collections) are passed through to the generic HID paths untouched.
+backlight to an external monitor.
+
+Another interface is a HID sensor hub with a single *Device Orientation*
+collection: input report 1 with three 9-bit angles and no feature report. The
+driver claims it and answers IIO reads with `GET_REPORT`. The ambient light
+sensors are on a third sensor-hub interface, which stays with the in-tree
+`hid-sensor-hub`/`hid-sensor-als` drivers; the vendor interface is passed
+through to the generic HID paths untouched.
 
 `brightness` is in the display's native units. Values below the hardware
 minimum (400) are raised to it: the panel can be dimmed but not switched off
@@ -118,6 +167,11 @@ through this control. Requests wake the (autosuspended) display first.
   perceptual curve would feel closer to macOS.
 - The 2022 Studio Display (USB ID `05ac:1114`) uses the same report layout but
   has not been tested with this driver.
+- The orientation sensor's readings for a rotated display are unconfirmed
+  (see *Auto-rotate*). It is also unknown whether the display pushes a report
+  when turned; the helper polls instead.
+- `hid-sensor-als` reports the light sensors' milli-lux values as lux
+  (1000× too high). Harmless for GNOME, which works relatively.
 - Finding the connector walks the device tree (PCI display controller →
   `drm/cardN` → connector). Non-PCI GPUs are not handled; set `connector=`.
 - With HDR enabled in GNOME, mutter uses its own reference-white control
@@ -125,7 +179,8 @@ through this control. Requests wake the (autosuspended) display first.
 
 ## Contributing
 
-The driver is `hid-apple-studio-display.c`; everything else is packaging. CI
+The driver is `hid-apple-studio-display.c`; `contrib/` holds the udev rule
+and helpers; everything else is packaging. CI
 compiles it against each supported LTS kernel plus current stable, runs
 checkpatch, and builds the Debian package. Please keep `checkpatch.pl --strict`
 clean and bump the version in `dkms.conf`, `MODULE_VERSION`, the PKGBUILD, the

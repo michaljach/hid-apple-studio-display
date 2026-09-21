@@ -40,7 +40,7 @@ jobs:
           cd linux
           make defconfig
           scripts/config --enable MODULES --enable PCI --enable HID --enable USB_HID \
-                         --enable DRM --enable BACKLIGHT_CLASS_DEVICE
+                         --enable DRM --enable BACKLIGHT_CLASS_DEVICE --enable IIO
           make olddefconfig
           make -j"$(nproc)" modules_prepare
 
@@ -62,7 +62,8 @@ jobs:
         run: |
           sh -n install.sh && sh -n uninstall.sh
           sudo apt-get install -y --no-install-recommends shellcheck
-          shellcheck -s sh install.sh uninstall.sh
+          shellcheck -s sh install.sh uninstall.sh contrib/asd-als-role contrib/asd-bind-orientation
+          python3 -m py_compile contrib/asd-autorotate
       - name: Versions agree
         run: |
           v=$(sed -n 's/^PACKAGE_VERSION="\(.*\)"/\1/p' dkms.conf)

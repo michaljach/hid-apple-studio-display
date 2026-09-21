@@ -1,0 +1,22 @@
+#!/bin/sh
+# Rebinds the Apple Studio Display's orientation-sensor HID interface from
+# hid-sensor-hub to hid-apple-studio-display. Both drivers match it; whichever
+# loads first at enumeration gets it, and only hid-apple-studio-display reads
+# its 9-bit angle fields correctly. Run by udev after the drivers have loaded,
+# and by install.sh for the running system.
+#
+# Usage: asd-bind-orientation [hid-device ...]   (default: every Apple display)
+set -u
+cd /sys/bus/hid/devices 2>/dev/null || exit 0
+[ $# -gt 0 ] || set -- 0003:05AC:1114.* 0003:05AC:1116.*
+for d in "$@"; do
+	[ -e "$d/report_descriptor" ] || continue
+	# Device Orientation collection: Usage Page Sensors (05 20), Usage 0x8A
+	# (09 8a), Collection Application (a1 01)
+	od -An -tx1 "$d/report_descriptor" | tr -d ' \n' | grep -q '0520098aa101' || continue
+	drv=$(basename "$(readlink "$d/driver" 2>/dev/null)" 2>/dev/null)
+	[ "$drv" = apple-studio-display ] && continue
+	[ -n "$drv" ] && echo "$d" > "/sys/bus/hid/drivers/$drv/unbind"
+	echo "$d" > /sys/bus/hid/drivers/apple-studio-display/bind
+done
+exit 0

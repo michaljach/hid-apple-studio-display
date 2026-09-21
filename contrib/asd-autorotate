@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Rotate an Apple Studio Display's GNOME output to follow its orientation sensor.
+
+hid-apple-studio-display exposes the display's orientation sensor as an IIO
+inclinometer (in_incli_{x,y,z}_raw, degrees). GNOME only auto-rotates the
+built-in panel of a laptop, so this helper polls the sensor and applies the
+matching transform to the display's connector through mutter's DisplayConfig
+D-Bus API (a temporary configuration, so nothing is written to monitors.xml).
+
+Experimental: so far only the landscape reading (0/0/0) of the sensor has been
+observed. By default the Z angle is used and snapped to the nearest quarter
+turn. Run `asd-autorotate --watch` while turning the display to see which axis
+moves, then pick --axis, --invert and --offset to match, and please report the
+readings so the defaults can be fixed.
+"""
+
+import argparse
+import glob
+import os
+import sys
+import time
+
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+IIO_NAME = "apple_studio_display_orientation"
+BUS_NAME = "org.gnome.Mutter.DisplayConfig"
+OBJECT_PATH = "/org/gnome/Mutter/DisplayConfig"
+# degrees -> MetaMonitorTransform
+TRANSFORMS = {0: 0, 90: 1, 180: 2, 270: 3}
+TRANSFORM_NAMES = {0: "normal", 1: "90", 2: "180", 3: "270"}
+
+
+def find_sensor():
+    for dev in glob.glob("/sys/bus/iio/devices/iio:device*"):
+        try:
+            with open(os.path.join(dev, "name")) as f:
+                if f.read().strip() == IIO_NAME:
+                    return dev
+        except OSError:
+            pass
+    return None
+
+
+def find_connector():
+    """The driver parents its backlight to the DRM connector: card1-DP-1 -> DP-1."""
+    for bl in glob.glob("/sys/class/backlight/apple_studio_display*"):
+        parent = os.path.basename(os.path.dirname(os.path.realpath(bl)))
+        if "-" in parent:
+            return parent.split("-", 1)[1]
+    return None
+
+
+def read_angles(dev):
+    angles = []
+    for axis in "xyz":
+        with open(os.path.join(dev, f"in_incli_{axis}_raw")) as f:
+            angles.append(int(f.read()))
+    return tuple(angles)
+
+
+def snap(angle):
+    return int(round(angle / 90.0)) % 4 * 90
+
+
+class DisplayConfig:
+    def __init__(self):
+        self.proxy = Gio.DBusProxy.new_for_bus_sync(
+            Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
+            BUS_NAME, OBJECT_PATH, BUS_NAME, None)
+
+    def current_transform(self, connector):
+        _, _, logical, _ = self._state()
+        for _, _, _, transform, _, monitors, _ in logical:
+            if connector in (m[0] for m in monitors):
+                return transform
+        return None
+
+    def set_transform(self, connector, transform):
+        serial, monitors, logical, _ = self._state()
+        current_mode = {}
+        for (conn, *_), modes, _ in monitors:
+            for mode_id, *_, props in modes:
+                if props.get("is-current"):
+                    current_mode[conn] = mode_id
+        new_logical = []
+        found = False
+        for x, y, scale, old, primary, mons, _ in logical:
+            conns = [m[0] for m in mons]
+            if connector in conns:
+                found = True
+                old = transform
+            new_logical.append(
+                (x, y, scale, old, primary, [(c, current_mode[c], {}) for c in conns]))
+        if not found:
+            raise RuntimeError(f"connector {connector} is not part of the current configuration")
+        # method 1: apply temporarily (not persisted to monitors.xml)
+        self.proxy.call_sync(
+            "ApplyMonitorsConfig",
+            GLib.Variant("(uua(iiduba(ssa{sv}))a{sv})", (serial, 1, new_logical, {})),
+            Gio.DBusCallFlags.NONE, -1, None)
+
+    def _state(self):
+        return self.proxy.call_sync(
+            "GetCurrentState", None, Gio.DBusCallFlags.NONE, -1, None).unpack()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--axis", choices="xyz", default="z",
+                    help="which angle is the rotation about the screen's normal (default: z)")
+    ap.add_argument("--invert", action="store_true", help="use 360 minus the reading")
+    ap.add_argument("--offset", type=int, default=0,
+                    help="degrees added to the reading before snapping")
+    ap.add_argument("--interval", type=float, default=1.0, help="poll interval in seconds")
+    ap.add_argument("--connector", help="DRM connector of the display (default: from the backlight)")
+    ap.add_argument("--watch", action="store_true", help="print the readings, do not rotate")
+    args = ap.parse_args()
+
+    dev = find_sensor()
+    if not dev:
+        sys.exit(f"no IIO device named {IIO_NAME}; is hid-apple-studio-display loaded and bound "
+                 "to the orientation interface (asd-bind-orientation)?")
+    connector = args.connector or find_connector()
+    if not connector and not args.watch:
+        sys.exit("could not find the display's connector; pass --connector")
+
+    config = None if args.watch else DisplayConfig()
+    applied = None if args.watch else config.current_transform(connector)
+    candidate, seen = None, 0
+    while True:
+        try:
+            angles = read_angles(dev)
+        except OSError as e:
+            print(f"sensor read failed: {e}", file=sys.stderr)
+            time.sleep(args.interval)
+            continue
+
+        angle = angles["xyz".index(args.axis)]
+        if args.invert:
+            angle = (360 - angle) % 360
+        degrees = snap((angle + args.offset) % 360)
+
+        if args.watch:
+            print(f"x={angles[0]:3d} y={angles[1]:3d} z={angles[2]:3d}  ->  {degrees:3d}°", flush=True)
+        else:
+            # require two consecutive identical readings before acting
+            if degrees == candidate:
+                seen += 1
+            else:
+                candidate, seen = degrees, 1
+            transform = TRANSFORMS[degrees]
+            if seen >= 2 and transform != applied:
+                try:
+                    config.set_transform(connector, transform)
+                    applied = transform
+                    print(f"{connector}: {TRANSFORM_NAMES[transform]} (sensor {angles})", flush=True)
+                except (GLib.Error, RuntimeError) as e:
+                    print(f"could not apply transform: {e}", file=sys.stderr)
+        time.sleep(args.interval)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Prints "rear" or "front" for one of the Apple Studio Display's two ambient
+# light IIO devices, given its sysfs devpath. The display enumerates the rear
+# sensor's HID collection before the front one, so the lower-numbered
+# platform device under the same HID interface is the rear sensor.
+set -u
+dev=/sys${1:?devpath}
+platform=$(basename "$(readlink -f "$dev/..")")
+hid=$(readlink -f "$dev/../..")
+first=$(ls "$hid" | grep '^HID-SENSOR-200041\.' | sort -t. -k2 -n | head -n 1)
+if [ "$platform" = "$first" ]; then echo rear; else echo front; fi
