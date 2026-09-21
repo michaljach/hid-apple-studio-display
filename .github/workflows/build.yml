@@ -72,7 +72,7 @@ jobs:
           head -1 packaging/debian/changelog | grep -q "($v-"
       - name: Debian package
         run: |
-          sudo apt-get install -y --no-install-recommends debhelper dh-dkms devscripts
+          sudo apt-get install -y --no-install-recommends build-essential debhelper dh-dkms devscripts
           cp -r packaging/debian debian
           dpkg-buildpackage -us -uc -b
           dpkg-deb -c ../hid-apple-studio-display-dkms_*_all.deb
