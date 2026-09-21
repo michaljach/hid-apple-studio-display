@@ -9,8 +9,7 @@ url="https://github.com/michaljach/hid-apple-studio-display"
 license=('GPL-2.0-only')
 depends=('dkms')
 source=("$_pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-# run `updpkgsums` once the release tag exists
-sha256sums=('SKIP')
+sha256sums=('555efeb47184f0662d8f1c02df1f498694cd1e98bbe85f371dd35153bfafa5d6')
 
 package() {
 	cd "$_pkgname-$pkgver"
