@@ -48,11 +48,11 @@ if ! headers_present || ! have dkms; then
 		zypper --non-interactive install "kernel-$flavor-devel" dkms gcc make
 	elif have pacman; then
 		case "$KVER" in
+			*-rt-lts*)   hdr=linux-rt-lts-headers ;;
+			*-rt*)       hdr=linux-rt-headers ;;
 			*-lts*)      hdr=linux-lts-headers ;;
 			*-zen*)      hdr=linux-zen-headers ;;
 			*-hardened*) hdr=linux-hardened-headers ;;
-			*-rt-lts*)   hdr=linux-rt-lts-headers ;;
-			*-rt*)       hdr=linux-rt-headers ;;
 			*)           hdr=linux-headers ;;
 		esac
 		pacman -S --needed --noconfirm "$hdr" dkms
@@ -104,7 +104,10 @@ fi
 
 log "Installed. The module now loads automatically whenever the display is plugged in."
 sleep 1
-bl=$(ls -d /sys/class/backlight/apple_studio_display* 2>/dev/null | head -1 || true)
+bl=
+for d in /sys/class/backlight/apple_studio_display*; do
+	[ -e "$d" ] && bl=$d && break
+done
 if [ -n "$bl" ]; then
 	printf '    backlight: %s\n    connector: %s\n    brightness: %s / %s\n' \
 		"$bl" "$(basename "$(dirname "$(readlink -f "$bl")")")" \
