@@ -92,6 +92,11 @@ temperature and chromaticity. iio-sensor-proxy would take the rear one, so the
 installed udev rule hides it and GNOME's *Automatic Screen Brightness* follows
 the front sensor.
 
+After installing, toggle *Settings → Power → Automatic Screen Brightness* off
+and on once (or log out and in): the installer restarts iio-sensor-proxy, and
+gnome-settings-daemon does not re-claim the light sensor on its own after
+that.
+
 How GNOME applies it: the brightness slider acts as a **bias** on the
 automatic target (`clamp(auto + slider − 0.5)`), and the reference light level
 is re-normalised whenever you move the slider. So set the slider to where you

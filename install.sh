@@ -135,6 +135,7 @@ if [ -n "$bl" ]; then
 			&& printf '    orientation sensor: %s (x=%s y=%s z=%s)\n' "$d" \
 				"$(cat "$d/in_incli_x_raw")" "$(cat "$d/in_incli_y_raw")" "$(cat "$d/in_incli_z_raw")"
 	done
+	printf '    Automatic brightness: gsd-power does not re-claim the light sensor after the\n    iio-sensor-proxy restart above; toggle Settings > Power > Automatic Screen\n    Brightness off and on once (or log out and in).\n'
 	printf '    Auto-rotate (experimental): systemctl --user enable --now asd-autorotate\n'
 else
 	printf '    No display found yet: plug the Studio Display'"'"'s USB/Thunderbolt link in and check\n    /sys/class/backlight/ or "dmesg | grep apple-studio".\n'
