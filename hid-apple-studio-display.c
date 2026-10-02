@@ -559,4 +559,4 @@ module_hid_driver(asd_driver);
 MODULE_AUTHOR("Michal Jach");
 MODULE_DESCRIPTION("Apple Studio Display backlight and orientation sensor driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("1.1.0");
+MODULE_VERSION("1.2.0");

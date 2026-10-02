@@ -2,7 +2,7 @@
 %global udevdir %{_prefix}/lib/udev
 
 Name:           %{modname}-dkms
-Version:        1.1.0
+Version:        1.2.0
 Release:        1%{?dist}
 Summary:        Apple Studio Display brightness and orientation driver (DKMS)
 License:        GPL-2.0-only
@@ -69,6 +69,10 @@ fi
 %{_userunitdir}/asd-gnome-rescan.service
 
 %changelog
+* Fri Oct 02 2026 Michal Jach <michaljach@gmail.com> - 1.2.0-1
+- asd-gnome-rescan: GNOME shows the brightness slider without re-plugging.
+- Installer explains why no display was found.
+
 * Mon Sep 21 2026 Michal Jach <michaljach@gmail.com> - 1.1.0-1
 - Orientation sensor as an IIO inclinometer; asd-autorotate helper.
 - udev rule so iio-sensor-proxy uses the front ambient light sensor.

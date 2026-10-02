@@ -1,3 +1,10 @@
+hid-apple-studio-display (1.2.0-1) unstable; urgency=medium
+
+  * asd-gnome-rescan: GNOME shows the brightness slider without re-plugging.
+  * Installer explains why no display was found.
+
+ -- Michal Jach <michaljach@gmail.com>  Fri, 02 Oct 2026 12:30:00 +0200
+
 hid-apple-studio-display (1.1.0-1) unstable; urgency=medium
 
   * Orientation sensor exposed as an IIO inclinometer; asd-autorotate helper.
