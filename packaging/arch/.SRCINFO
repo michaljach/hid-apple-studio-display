@@ -1,6 +1,6 @@
 pkgbase = hid-apple-studio-display-dkms
 	pkgdesc = Brightness (backlight) and orientation sensor driver for the Apple Studio Display / Studio Display XDR (DKMS)
-	pkgver = 1.1.0
+	pkgver = 1.2.0
 	pkgrel = 1
 	url = https://github.com/michaljach/hid-apple-studio-display
 	arch = any
@@ -8,7 +8,7 @@ pkgbase = hid-apple-studio-display-dkms
 	depends = dkms
 	optdepends = python-gobject: GNOME brightness slider without re-plugging (asd-gnome-rescan), asd-autorotate
 	optdepends = iio-sensor-proxy: automatic brightness from the ambient light sensor
-	source = hid-apple-studio-display-1.1.0.tar.gz::https://github.com/michaljach/hid-apple-studio-display/archive/v1.1.0.tar.gz
-	sha256sums = c4a5755c6a43d5d566ddca342389c7d64cf2dbe1ff4d326388f949052f6cef40
+	source = hid-apple-studio-display-1.2.0.tar.gz::https://github.com/michaljach/hid-apple-studio-display/archive/v1.2.0.tar.gz
+	sha256sums = 21fba604dd5ada43f3b07d4badd2ea4f94a432422732abc0044803fbf9acb149
 
 pkgname = hid-apple-studio-display-dkms
