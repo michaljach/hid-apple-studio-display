@@ -14,3 +14,10 @@ ACTION=="add|change", SUBSYSTEM=="iio", KERNELS=="0003:05AC:1114.*|0003:05AC:111
 # hid-apple-studio-display (the only one that can read its 9-bit fields).
 ACTION=="add", SUBSYSTEM=="hid", ENV{MODALIAS}=="hid:b0003g0003v000005ACp0000111[46]", \
   RUN+="/usr/lib/udev/asd-bind-orientation %k"
+
+# mutter looks for a monitor's backlight only when it applies a monitor
+# configuration, so a backlight registered after the session started gets no
+# brightness slider. Have the user's service manager start asd-gnome-rescan,
+# which re-applies the current configuration unchanged.
+ACTION=="add", SUBSYSTEM=="backlight", KERNEL=="apple_studio_display*", \
+  TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="asd-gnome-rescan.service"

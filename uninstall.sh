@@ -19,7 +19,8 @@ if have systemctl; then
 	systemctl --user -M "$(logname 2>/dev/null || echo root)@" disable --now asd-autorotate.service 2>/dev/null || true
 fi
 rm -f /etc/udev/rules.d/90-hid-apple-studio-display.rules /usr/lib/udev/asd-als-role /usr/lib/udev/asd-bind-orientation \
-      /usr/local/bin/asd-autorotate /usr/local/lib/systemd/user/asd-autorotate.service
+      /usr/local/bin/asd-autorotate /usr/local/lib/systemd/user/asd-autorotate.service \
+      /usr/local/bin/asd-gnome-rescan /usr/local/lib/systemd/user/asd-gnome-rescan.service
 if have udevadm; then
 	udevadm control --reload 2>/dev/null || true
 fi

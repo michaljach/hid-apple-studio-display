@@ -79,10 +79,18 @@ dmesg | grep apple-studio
 cat /sys/class/backlight/apple_studio_display0/actual_brightness
 ```
 
-GNOME only looks for backlights when its monitor list changes, so the **first
-time** after installing either re-plug the display or re-apply the display
-configuration (Settings → Displays). From the next boot on the module is loaded
-before the session starts and nothing needs doing.
+GNOME only looks for backlights when it applies a monitor configuration, not
+when a backlight appears. Whenever the display's backlight shows up while a
+session is running (right after installing, or when only the display's USB link
+was re-plugged), the udev rule starts the `asd-gnome-rescan` user service, which
+re-applies the current configuration unchanged so the slider appears (needs
+python-gobject). If it still does not, run `asd-gnome-rescan` or re-apply the
+configuration in Settings → Displays.
+
+If `install.sh` reports that the display's USB hub is there but the display
+itself is not, its USB controller has stopped responding (the kernel log shows
+`error -71` for it): unplug the USB‑C/Thunderbolt cable for a few seconds, or
+power-cycle the display.
 
 ## Automatic brightness
 

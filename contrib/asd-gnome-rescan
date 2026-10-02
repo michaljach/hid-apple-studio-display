@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Make GNOME pick up an Apple Studio Display backlight that appeared late.
+
+mutter looks for a monitor's backlight only when it rebuilds its outputs, which
+happens when the monitor configuration is applied, not when a backlight device
+shows up. A backlight registered after the session started (module installed
+or reloaded, the display's USB link re-plugged while the video link stayed up)
+therefore gets no brightness slider until the display settings are applied
+again. This re-applies the current configuration unchanged through mutter's
+DisplayConfig D-Bus API (temporarily, so nothing is written to monitors.xml).
+
+Started by asd-gnome-rescan.service, which the udev rule pulls into the user's
+service manager whenever the backlight appears. Without a running GNOME
+session there is nothing to do and it exits quietly.
+"""
+
+import sys
+
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+BUS_NAME = "org.gnome.Mutter.DisplayConfig"
+OBJECT_PATH = "/org/gnome/Mutter/DisplayConfig"
+# monitor properties ApplyMonitorsConfig accepts, carried over as they are
+KEPT_PROPS = {"color-mode": "u", "rgb-range": "u"}
+
+
+def main():
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        if not bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                             "org.freedesktop.DBus", "NameHasOwner",
+                             GLib.Variant("(s)", (BUS_NAME,)), None,
+                             Gio.DBusCallFlags.NONE, -1, None).unpack()[0]:
+            return 0
+        proxy = Gio.DBusProxy.new_sync(bus, Gio.DBusProxyFlags.NONE, None,
+                                       BUS_NAME, OBJECT_PATH, BUS_NAME, None)
+        serial, monitors, logical, props = proxy.call_sync(
+            "GetCurrentState", None, Gio.DBusCallFlags.NONE, -1, None).unpack()
+    except GLib.Error as e:
+        print(f"GNOME display configuration not available: {e.message}", file=sys.stderr)
+        return 0
+
+    current = {}
+    for (conn, *_), modes, mon_props in monitors:
+        mode = next((m[0] for m in modes if m[-1].get("is-current")), None)
+        kept = {k: GLib.Variant(t, mon_props[k]) for k, t in KEPT_PROPS.items() if k in mon_props}
+        current[conn] = (mode, kept)
+
+    new_logical = []
+    for x, y, scale, transform, primary, mons, _ in logical:
+        new_logical.append((x, y, scale, transform, primary,
+                            [(m[0], *current[m[0]]) for m in mons]))
+
+    config_props = {}
+    if props.get("supports-changing-layout-mode") and "layout-mode" in props:
+        config_props["layout-mode"] = GLib.Variant("u", props["layout-mode"])
+
+    try:
+        # method 1: temporary, the stored configuration stays as it is
+        proxy.call_sync(
+            "ApplyMonitorsConfig",
+            GLib.Variant("(uua(iiduba(ssa{sv}))a{sv})", (serial, 1, new_logical, config_props)),
+            Gio.DBusCallFlags.NONE, -1, None)
+    except GLib.Error as e:
+        print(f"could not re-apply the display configuration: {e.message}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

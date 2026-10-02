@@ -8,7 +8,7 @@ arch=('any')
 url="https://github.com/michaljach/hid-apple-studio-display"
 license=('GPL-2.0-only')
 depends=('dkms')
-optdepends=('python-gobject: asd-autorotate helper'
+optdepends=('python-gobject: GNOME brightness slider without re-plugging (asd-gnome-rescan), asd-autorotate'
             'iio-sensor-proxy: automatic brightness from the ambient light sensor')
 source=("$_pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('c4a5755c6a43d5d566ddca342389c7d64cf2dbe1ff4d326388f949052f6cef40')
@@ -18,8 +18,8 @@ package() {
 	install -Dm644 -t "$pkgdir/usr/src/$_pkgname-$pkgver" "$_pkgname.c" Makefile dkms.conf
 	install -Dm644 -t "$pkgdir/usr/lib/udev/rules.d" contrib/90-hid-apple-studio-display.rules
 	install -Dm755 -t "$pkgdir/usr/lib/udev" contrib/asd-als-role contrib/asd-bind-orientation
-	install -Dm755 -t "$pkgdir/usr/bin" contrib/asd-autorotate
-	install -Dm644 -t "$pkgdir/usr/lib/systemd/user" contrib/asd-autorotate.service
+	install -Dm755 -t "$pkgdir/usr/bin" contrib/asd-autorotate contrib/asd-gnome-rescan
+	install -Dm644 -t "$pkgdir/usr/lib/systemd/user" contrib/asd-autorotate.service contrib/asd-gnome-rescan.service
 	install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md
 	install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE
 }
