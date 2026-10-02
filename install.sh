@@ -149,7 +149,7 @@ diagnose_missing_display() {
 		warn "The display is on USB but no backlight was registered yet; see: dmesg | grep apple-studio"
 	elif hub=$(apple_usb 8011); then
 		warn "The display's USB hub is connected, but the display's own USB device is not."
-		if dmesg 2>/dev/null | grep "usb $hub[.-]" \
+		if dmesg 2>/dev/null | grep "usb ${hub}[.-]" \
 			| grep -q 'unable to enumerate USB device\|error -71\|not accepting address'; then
 			printf '    The kernel log shows a USB device failing to enumerate: the display'"'"'s\n    controller has stopped responding. Unplug its USB-C/Thunderbolt cable for a\n    few seconds (or power-cycle the display); the driver binds when it comes back.\n'
 		else

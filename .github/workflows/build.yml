@@ -63,7 +63,7 @@ jobs:
           sh -n install.sh && sh -n uninstall.sh
           sudo apt-get install -y --no-install-recommends shellcheck
           shellcheck -s sh install.sh uninstall.sh contrib/asd-als-role contrib/asd-bind-orientation
-          python3 -m py_compile contrib/asd-autorotate
+          python3 -m py_compile contrib/asd-autorotate contrib/asd-gnome-rescan
       - name: Versions agree
         run: |
           v=$(sed -n 's/^PACKAGE_VERSION="\(.*\)"/\1/p' dkms.conf)
